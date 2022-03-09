@@ -16,8 +16,8 @@
 #       result <- engraftment(FMT_abundance, FMT_config, group = 'Outcomes', blocked='Blocked')
 #   
 #
-#   Input: signature matrix and mixture file, formatted as test file
-#   Output: engraft ratio and its p with group (FMT outcomes)
+#   Input: microbial abundance matrix and FMT config file, formatted as test files
+#   Output: engraft ratio and its p value with group (FMT outcomes)
 #
 #       Options:
 #       1) group: the group factor used for hypothesis testing, default: 'Outcomes' as column name
