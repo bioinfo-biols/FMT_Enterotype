@@ -1,0 +1,9 @@
+Before	Donor	After	Outcomes	Blocked
+B1	D1	A1	Response	1
+B2	D2	A2	Response	1
+B3	D3	A3	Response	1
+B4	D4	A4	Failure	2
+B5	D5	A5	Response	2
+B6	D6	A6	Response	2
+B7	D7	A7	Failure	1
+B8	D8	A8	Failure	1
