@@ -12,11 +12,20 @@
   Our donor selection model based on enterotype for FMT (EDS model) performance in validations.  
 </p>
 
-### Directory structure: 
-In the folder "analysis_code_Rmd", we provided pure code of our analyses, which is suitable to read online.  
-In the folder "analysis_figures_Rnotebook", we provided PDF and HTML versions of our analysis to make it easier to understand our analyses with the output and figures. It is best to download the raw file, and read it with a PDF reader or browser.
-
-
+### Directory structure:  
+&nbsp; &nbsp; &nbsp; &nbsp; analysis_code_Rmd: pure code of our analyses, which is suitable to read online.  
+&nbsp; &nbsp; &nbsp; &nbsp; analysis_figures_Rnotebook: PDF and HTML versions of our analysis to make it easier to understand our analyses with the output and figures. It is best to download the raw file, and read it with a PDF reader or browser.    
+&nbsp; &nbsp; &nbsp; &nbsp; engraftment_ratio: code for quantify engraftment ratio.  
+    
+### Engraftment ratio usage:
+    source('engraftment_ratio.R')
+    result <- engraftment(FMT_abundance, FMT_config, group = 'Outcomes', blocked = 0)
+Input: microbial abundance matrix and FMT config file, formatted as test files  
+Output: engraft ratio and its p value with group (FMT outcomes)  
+  
+We provided test Rmd script and test files in the folder "engraftment_ratio":  
+&nbsp; &nbsp; &nbsp; &nbsp; test script: &nbsp; &nbsp; test_engraftment_ratio.Rmd  
+&nbsp; &nbsp; &nbsp; &nbsp; test files: &nbsp; FMT_abundance.tsv and FMT_abundance.tsv  
 
 ### Citation:
 The interplay of gut microbiota between donors and recipients determines the efficacy of fecal microbiota transplantation. Under review.
