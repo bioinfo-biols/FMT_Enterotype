@@ -13,9 +13,9 @@
 </p>
 
 ### Directory structure:  
-&nbsp; &nbsp; &nbsp; &nbsp; analysis_code_Rmd: pure code of our analyses, which is suitable to read online.  
-&nbsp; &nbsp; &nbsp; &nbsp; analysis_figures_Rnotebook: PDF and HTML versions of our analysis to make it easier to understand our analyses with the output and figures. It is best to download the raw file, and read it with a PDF reader or browser.    
-&nbsp; &nbsp; &nbsp; &nbsp; engraftment_ratio: code for quantify engraftment ratio.  
+&nbsp; &nbsp; &nbsp; &nbsp; **analysis_code_Rmd**: pure code of our analyses, which is suitable to read online.  
+&nbsp; &nbsp; &nbsp; &nbsp; **analysis_figures_Rnotebook**: PDF and HTML versions of our analysis to make it easier to understand our analyses with the output and figures. It is best to download the raw file, and read it with a PDF reader or browser.    
+&nbsp; &nbsp; &nbsp; &nbsp; **engraftment_ratio**: code for quantify engraftment ratio.  
     
 ### Engraftment ratio usage:
     source('engraftment_ratio.R')
