@@ -1,0 +1,1064 @@
+---
+title: "Enterotype detemine Notebook"
+output: html_notebook
+---
+
+This is an [R Markdown](http://rmarkdown.rstudio.com) Notebook. When you execute code within the notebook, the results appear beneath the code. 
+
+Try executing this chunk by clicking the *Run* button within the chunk or by placing your cursor inside it and pressing *Ctrl+Shift+Enter*. 
+
+```{r}
+library(ggplot2)
+
+library(cluster)
+library(clusterSim)
+library(ade4)
+library(pROC)
+library(reshape2)
+library(ggpubr)
+library(coin)
+library(gridExtra)
+library(ape)
+```
+
+```{r}
+setwd(dirname(rstudioapi::getActiveDocumentContext()$path))
+getwd()
+```
+
+```{r}
+source("pre_processing.R")
+```
+```{r}
+diff_entro_names <- function(t_pre_data_remove_c, pre_data.prj, pre_data.cluster){
+    library(coin)
+    quan<-seq(0.1, 0.9, 0.05)
+    group <- pre_data.cluster
+    prj <- pre_data.prj
+    
+    abundan_diff <- apply(t_pre_data_remove_c[,1:(ncol(t_pre_data_remove_c)-2)], 2, function(x){
+        pt <-  as.data.frame(cbind(as.numeric(x), group, prj))
+        colnames(pt)<-c('nx', 'group', 'prj')
+        upt <- pt
+        
+        prj_list <- upt$prj
+        list <- NULL
+        for(i in unique(prj_list)){
+            if (length(prj_list[prj_list %in% i]) > 2){
+                list <- c(list, i)
+            }
+        }
+        upt <- upt[upt$prj %in% list,]
+        upt$nx <- as.numeric(as.character(upt$nx))
+        tmp_test <- wilcox_test(nx ~ group | prj, upt)
+        # tmp_test <- wilcox_test(nx ~ group , upt)
+        pval_a <- NA
+        pval_a <- pvalue(tmp_test)
+        a_nx <- upt[upt$group %in% c('before1'), 'nx']
+        p_nx <- upt[upt$group %in% c('before2'), 'nx']
+        case <- mean(log(a_nx + 0.0001), trim = 0)
+        # control <- quantile(log10(p_nx+ 0.0001), quan)
+        control <- mean(log(p_nx+ 0.0001), trim = 0)
+        gfc <- sum((case - control))/length(quan)
+        return(c(pval_a, gfc))
+    })
+    abundan_diff_t <- data.frame(t(abundan_diff))
+    colnames(abundan_diff_t) <- c('pval', 'gfc')
+    abundan_diff_t$id <- rownames(abundan_diff_t)
+    abundan_diff_t <- abundan_diff_t[!is.na(abundan_diff_t$pval),]
+    abundan_diff_t$pval <- as.numeric(as.character(abundan_diff_t$pval))
+    diff_qvalue <- p.adjust(abundan_diff_t$pval, method='fdr')
+    abundan_diff_t <- cbind(abundan_diff_t, diff_qvalue)
+    abundan_diff_t
+}
+```
+```{r}
+## Enterotype in CDI
+```
+
+```{r}
+
+pre_data <- L6_rela_fil_sAg_others[,unique(c(meta_fil_config[meta_fil_config$Diease1 %in% c('CDI'), c('Previous_sra')]))]/1000
+# head(colSums(pre_data))
+
+pre_data_remove = noise.removal(pre_data, percent=0.01)
+pre_data.dist=dist.JSD(pre_data_remove)
+
+require(clusterSim)
+
+pre_nclusters=NULL
+for (k in 1:10) { 
+  if (k==1) {
+    pre_nclusters[k]=NA 
+  } else {
+    pre_data.cluster_temp=pam.clustering(pre_data.dist, k)
+    pre_nclusters[k]=index.G1(t(pre_data_remove), pre_data.cluster_temp,  d = pre_data.dist,
+                          centrotypes = "centroids")#medoids
+  }
+}
+```
+```{r}
+plot(pre_nclusters, type="b", xlab="k clusters", ylab="CH index",main="Optimal number of clusters")
+pdf(file='./figure1/1main_CDI_class.pdf')
+plot(pre_nclusters, type="b", xlab="Number of clusters", ylab="CH index")
+dev.off()
+```
+
+```{r, fig.height=8}
+
+pre_data.cluster=pam.clustering(pre_data.dist, k=2)
+
+pre_obs.silhouette=mean(silhouette(pre_data.cluster, pre_data.dist)[,3])
+cat(pre_obs.silhouette) #0.1899451
+
+pre_obs.pcoa=dudi.pco(pre_data.dist, scannf=F, nf=2)
+
+
+##pcoa
+
+PCo1 <- pre_obs.pcoa$li[ ,1]
+PCo2 = pre_obs.pcoa$li[ ,2]
+
+library(ggplot2)
+library(vegan)
+
+
+Groupn<-'postfmt'
+sample.groups <- 1
+
+
+adonis(pre_data.dist ~ pre_data.cluster, permutations = 999)
+
+plotdata <- data.frame(rownames(pre_obs.pcoa$li),PCo1,PCo2, sample.groups, pre_data.cluster)
+colnames(plotdata) <-c("sample","PCo1","PCo2","group", "data.cluster")
+pc1 <-floor(pre_obs.pcoa$eig[1]*10000/sum(pre_obs.pcoa$eig))/100
+pc2 <-floor(pre_obs.pcoa$eig[2]*10000/sum(pre_obs.pcoa$eig))/100
+
+
+p<-ggplot(plotdata, alpha=I(0.8))+
+  theme_classic()+
+  stat_ellipse(aes(x=PCo1, y=PCo2, colour=as.factor(data.cluster),
+                   group=as.factor(data.cluster)), level=0.9, size=1.5, show.legend = NA)+
+  labs(title=paste("CDI patients (N=", length(PCo1),")"), x=paste("PCo1(",pc1,"%)"),y=paste("PCo2(",pc2,"%)") , colour="Cluster")+
+  geom_point(aes(x=PCo1,y=PCo2, colour=as.factor(data.cluster), shape=factor(sample.groups),
+                 alpha = factor(sample.groups)),size=4)+
+  theme(text=element_text(family ="sans", size=32), plot.title = element_text(size=34, hjust = 0.5), axis.text = element_text(size=32, color ='dimgray'), axis.title.x = element_text(size=34), axis.title.y = element_text(size=34), axis.ticks = element_blank())+
+  theme(aspect.ratio=0.95, legend.position = c(4, .65), legend.background=element_rect(fill = NA), legend.text = element_text(size=18))+
+  scale_colour_manual(values=c("#7A1D1E", "#C47737", "#E7A600"))+
+  scale_alpha_manual(values = c(0.8))+
+  theme(panel.background = element_rect(fill = NA, colour = "lightgrey", size = 3)
+        ,axis.line=element_line(colour=NA, size = 0),axis.ticks = element_line(size=1.5, color ='dimgray'), axis.ticks.length = unit(7, "pt"));p
+
+fig1i<-1
+ggsave(paste("./figure1/1main_", fig1i, ".pdf", sep = ''), device = "pdf")
+fig1i = fig1i + 1
+
+
+beofre_entro_cdi <- cbind(rownames(pre_obs.pcoa$li), paste(rep('before', length(pre_data.cluster)), pre_data.cluster, sep = ''), meta_fil_config[match(rownames(pre_obs.pcoa$li), meta_fil_config$Previous_sra), 'PRJ'])
+```
+```{r}
+library(coin)
+pre_data.cluster <- beofre_entro_cdi[,2]
+pre_data.prj <- beofre_entro_cdi[,3]
+
+pre_simp_name <- sapply(as.character(rownames(pre_data_remove)), simp_names)
+pre_data_remove_c <- rbind(pre_data_remove/100 + 1e-5, pre_data.cluster, pre_data.prj)
+rownames(pre_data_remove_c) <- c(pre_simp_name, 'pre_data.cluster', 'pre_data.prj')
+t_pre_data_remove_c<-t(pre_data_remove_c)
+t_pre_data_remove_c <- data.frame(t_pre_data_remove_c, stringsAsFactors = F)
+t_pre_data_remove_c$pre_data.cluster <- as.factor(as.character(t_pre_data_remove_c$pre_data.cluster))
+t_pre_data_remove_c$pre_data.prj <- as.factor(t_pre_data_remove_c$pre_data.prj)
+
+```
+
+
+```{r}
+t_pre_data_remove_c$Enterobacteriaceae_ <- as.numeric(t_pre_data_remove_c$Enterobacteriaceae_)
+wilcox_test(Enterobacteriaceae_ ~ pre_data.cluster| pre_data.prj, t_pre_data_remove_c)
+
+t_pre_data_remove_c$Bacteroides <- as.numeric(t_pre_data_remove_c$Bacteroides)
+wilcox_test(Bacteroides ~ pre_data.cluster| pre_data.prj, t_pre_data_remove_c)
+```
+```{r}
+# t_pre_data_remove_c$Salmonella <- as.numeric(t_pre_data_remove_c$Salmonella)
+# wilcox_test(Salmonella ~ pre_data.cluster| pre_data.prj, t_pre_data_remove_c)
+
+```
+
+
+```{r}
+##sum genus to family for Enterobacteriaceae
+keyword = 'f__Enterobacteriaceae'
+genus_key <- sapply(as.character(grep(keyword, rownames(pre_data_remove), value = TRUE)), simp_names)
+t_pre_data_remove_c_Entero <- colSums(apply(t_pre_data_remove_c[,genus_key], 1, as.numeric))
+names(t_pre_data_remove_c_Entero) == rownames(t_pre_data_remove_c)
+plot_pre_data <- cbind((t_pre_data_remove_c_Entero), t_pre_data_remove_c[,c('pre_data.cluster', 'Enterobacteriaceae_', 'Bacteroides')])
+colnames(plot_pre_data) <- c('Enterobacteriaceae', 'pre_data.cluster', 'Enterobacteriaceae_', 'Bacteroides')
+```
+
+```{r, fig.height=8}
+plot_pre_data1<- plot_pre_data
+plot_pre_data1$pre_data.cluster <- ifelse(plot_pre_data1$pre_data.cluster == 'before1', 'ET_E', 'ET_B')
+plot_pre_data1$pre_data.cluster <- factor(plot_pre_data1$pre_data.cluster , levels=c('ET_E', 'ET_B'))
+
+p1<-ggviolin(plot_pre_data1, x="pre_data.cluster", y="Enterobacteriaceae_", fill = "pre_data.cluster",#fill = "", Enterobacteriaceae_
+             alpha = 0.8,  add.params = list(alpha=1), palette = c("#7A1D1E", "#C47737"), size = 0.8)+
+  stat_compare_means(comparisons = list(c('ET_E', 'ET_B')), method = 'wilcox.test', label = "p.signif", label.x = 1.5, label.y = 1, size=8)+
+  # yscale("log2", .format = FALSE)+
+  theme_classic()+theme(legend.position = "right")+xlab(label = '')+ylab("Log Abundance")+labs(title='Enterobacteriaceae;g__')+
+  theme(text=element_text(family ="sans", size=32), plot.title = element_text(size=34, hjust = 0.5, face = 'italic'), axis.text = element_text(size=32, color ='dimgray'), axis.title.x = element_text(size=34), axis.title.y = element_text(size=34), axis.ticks = element_blank())+
+  theme( aspect.ratio=2, 
+        legend.direction = 'horizontal', legend.position = c(5, .15), legend.background=element_rect(fill = NA)
+        ,panel.background = element_rect(fill = NA, colour = "lightgrey", size = 3)
+        ,axis.line=element_line(colour=NA, size = 0),axis.ticks.y = element_line(size=1.5, color ='dimgray'), axis.ticks.length = unit(7, "pt"))+
+    scale_y_log10(expand = expansion(add=c(0, 0.5)));p1
+
+ggsave(paste("./figure1/fig_s1_", fig1i, ".pdf", sep = ''), device = "pdf")
+fig1i = fig1i + 1
+
+p2<-ggviolin(plot_pre_data1, x="pre_data.cluster", y="Bacteroides", fill = "pre_data.cluster",#fill = "", 
+             alpha = 0.8,  add.params = list(alpha=1), palette = c("#7A1D1E", "#C47737"), size = 0.8)+
+  stat_compare_means(comparisons = list(c('ET_E', 'ET_B')), method = 'wilcox.test', label = "p.signif", label.x = 1.5, label.y = 1, size=8)+
+  # yscale("log2", .format = FALSE)+
+  theme_classic()+theme(legend.position = "right")+xlab(label = '')+ylab(" ")+labs(title='Bacteroides')+
+  theme(text=element_text(family ="sans", size=32), plot.title = element_text(size=34, hjust = 0.5, face = 'italic'), axis.text = element_text(size=32, color ='dimgray'), axis.title.x = element_text(size=34), axis.title.y = element_text(size=34), axis.ticks = element_blank())+
+  theme(aspect.ratio=2,
+        legend.direction = 'horizontal', legend.position = c(5, .15), legend.background=element_rect(fill = NA)
+        ,panel.background = element_rect(fill = NA, colour = "lightgrey", size = 3)
+        ,axis.line=element_line(colour=NA, size = 0),axis.ticks.y = element_line(size=1.5, color ='dimgray'), axis.ticks.length = unit(7, "pt"))+
+    scale_y_log10(expand = expansion(add=c(0, 0.5)));p2 #axis.title=element_text(size=21), 
+
+
+ggsave(paste("./figure1/fig_s1_", fig1i, ".pdf", sep = ''), device = "pdf")
+fig1i = fig1i + 1
+
+p3<-ggviolin(plot_pre_data1, x="pre_data.cluster", y="Enterobacteriaceae", fill = "pre_data.cluster",#fill = "", 
+             alpha = 0.8,  add.params = list(alpha=1), palette = c("#7A1D1E", "#C47737"), size = 0.8)+
+  stat_compare_means(comparisons = list(c('ET_E', 'ET_B')), method = 'wilcox.test', label = "p.signif", label.x = 1.5, label.y = 1, size=8)+
+  # yscale("log2", .format = FALSE)+
+  theme_classic()+theme(legend.position = "right")+xlab(label = '')+ylab(" ")+labs(title='Enterobacteriaceae')+
+  theme(text=element_text(family ="sans", size=32), plot.title = element_text(size=34, hjust = 0.5), axis.text = element_text(size=32, color ='dimgray'), axis.title.x = element_text(size=34), axis.title.y = element_text(size=34), axis.ticks = element_blank())+#, face = 'italic'
+  theme(aspect.ratio=2,
+        legend.direction = 'horizontal', legend.position = c(5, .15), legend.background=element_rect(fill = NA)
+        ,panel.background = element_rect(fill = NA, colour = "lightgrey", size = 3)
+        ,axis.line=element_line(colour=NA, size = 0),axis.ticks.y = element_line(size=1.5, color ='dimgray'), axis.ticks.length = unit(7, "pt"))+
+    scale_y_log10(expand = expansion(add=c(0, 0.5)));p3 #axis.title=element_text(size=21), 
+
+
+ggsave(paste("./figure1/fig_s1_", fig1i, ".pdf", sep = ''), device = "pdf")
+fig1i = fig1i + 1
+```
+```{r}
+## Enterotype in IBD
+```
+
+```{r}
+
+pre_data1 <- L6_rela_fil_sAg_others[,unique(c(meta_fil_config[!meta_fil_config$Diease1 %in% c('CDI'), c('Previous_sra')]))]/1000
+# head(colSums(pre_data1))
+
+pre_data1_remove = noise.removal(pre_data1, percent=0.01)
+pre_data1.dist=dist.JSD(pre_data1_remove)
+
+require(clusterSim)
+
+pre_nclusters=NULL
+for (k in 1:10) { 
+  if (k==1) {
+    pre_nclusters[k]=NA 
+  } else {
+    pre_data1.cluster_temp=pam.clustering(pre_data1.dist, k)
+    pre_nclusters[k]=index.G1(t(pre_data1_remove), pre_data1.cluster_temp,  d = pre_data1.dist,
+                          centrotypes = "centroids")#medoids
+  }
+}
+```
+```{r}
+plot(pre_nclusters, type="b", xlab="k clusters", ylab="CH index",main="Optimal number of clusters")
+pdf(file='./figure1/1main_IBD_class.pdf')
+plot(pre_nclusters, type="b", xlab="Number of clusters", ylab="CH index")
+dev.off()
+```
+
+```{r, fig.height=8}
+
+pre_data1.cluster=pam.clustering(pre_data1.dist, k=2)
+
+pre_obs.silhouette=mean(silhouette(pre_data1.cluster, pre_data1.dist)[,3])
+cat(pre_obs.silhouette) #0.1899451
+
+pre_obs.pcoa=dudi.pco(pre_data1.dist, scannf=F, nf=2)
+
+##pcoa
+
+PCo1 <- pre_obs.pcoa$li[ ,1]
+PCo2 = pre_obs.pcoa$li[ ,2]
+
+library(ggplot2)
+library(vegan)
+
+Groupn<-'postfmt'
+
+sample.groups <- 1
+
+pre_data1.cluster <- -1 * as.numeric(pre_data1.cluster) + 3
+
+adonis(pre_data1.dist ~ pre_data1.cluster, permutations = 999)
+
+plotdata <- data.frame(rownames(pre_obs.pcoa$li),PCo1,PCo2, sample.groups, pre_data1.cluster)
+colnames(plotdata) <-c("sample","PCo1","PCo2","group", "data.cluster")
+pc1 <-floor(pre_obs.pcoa$eig[1]*10000/sum(pre_obs.pcoa$eig))/100
+pc2 <-floor(pre_obs.pcoa$eig[2]*10000/sum(pre_obs.pcoa$eig))/100
+
+
+p<-ggplot(plotdata, alpha=I(0.8))+
+  theme_classic()+
+  stat_ellipse(aes(x=PCo1, y=PCo2, colour=as.factor(data.cluster),
+                   group=as.factor(data.cluster)), level=0.9, size=1.5, show.legend = NA)+
+  labs(title=paste("IBD patients (N=", length(PCo1),")"), x=paste("PCo1(",pc1,"%)"),y=paste("PCo2(",pc2,"%)") , colour="Cluster")+
+  geom_point(aes(x=PCo1,y=PCo2, colour=as.factor(data.cluster), shape=factor(sample.groups),
+                 alpha = factor(sample.groups)),size=4)+
+  # theme(plot.title = element_text(size=21, hjust = 0.5),
+  #     # title=element_text(family ="sans", size=21),
+  #       text=element_text(family ="sans", size=18),)+
+  theme(text=element_text(family ="sans", size=32), plot.title = element_text(size=34, hjust = 0.5), axis.text = element_text(size=32, color ='dimgray'), axis.title.x = element_text(size=34), axis.title.y = element_text(size=34), axis.ticks = element_blank())+
+  theme(aspect.ratio=0.95, legend.position = c(4, .65), legend.background=element_rect(fill = NA), legend.text = element_text(size=18))+
+  scale_colour_manual(values=c("#7A1D1E", "#C47737", "#E7A600"))+
+  scale_alpha_manual(values = c(0.8))+
+  theme(panel.background = element_rect(fill = NA, colour = "lightgrey", size = 3)
+        ,axis.line=element_line(colour=NA, size = 0),axis.ticks = element_line(size=1.5, color ='dimgray'), axis.ticks.length = unit(7, "pt"));p
+
+# fig1i<-1
+ggsave(paste("./figure1/1main_", fig1i, ".pdf", sep = ''), device = "pdf")
+fig1i = fig1i + 1
+
+# grid.arrange(p1,p2,nrow=1)
+beofre_entro_ibd <- cbind(rownames(pre_obs.pcoa$li), paste(rep('before', length(pre_data1.cluster)), pre_data1.cluster, sep = ''), meta_fil_config[match(rownames(pre_obs.pcoa$li), meta_fil_config$Previous_sra), 'PRJ'])
+```
+```{r}
+library(coin)
+pre_data1.cluster <- beofre_entro_ibd[,2]
+pre_data1.prj <- beofre_entro_ibd[,3]
+
+pre_simp_name <- sapply(as.character(rownames(pre_data1_remove)), simp_names)
+pre_data1_remove_c <- rbind(pre_data1_remove/100 + 1e-5, pre_data1.cluster, pre_data1.prj)
+rownames(pre_data1_remove_c) <- c(pre_simp_name, 'pre_data1.cluster', 'pre_data1.prj')
+t_pre_data1_remove_c<-t(pre_data1_remove_c)
+t_pre_data1_remove_c <- data.frame(t_pre_data1_remove_c, stringsAsFactors = F)
+t_pre_data1_remove_c$pre_data1.cluster <- as.factor(as.character(t_pre_data1_remove_c$pre_data1.cluster))
+t_pre_data1_remove_c$pre_data1.prj <- as.factor(t_pre_data1_remove_c$pre_data1.prj)
+
+
+```
+
+
+```{r}
+t_pre_data1_remove_c$Enterobacteriaceae_ <- as.numeric(t_pre_data1_remove_c$Enterobacteriaceae_)
+wilcox_test(Enterobacteriaceae_ ~ pre_data1.cluster| pre_data1.prj, t_pre_data1_remove_c)
+
+t_pre_data1_remove_c$Bacteroides <- as.numeric(t_pre_data1_remove_c$Bacteroides)
+wilcox_test(Bacteroides ~ pre_data1.cluster| pre_data1.prj, t_pre_data1_remove_c)
+```
+
+
+```{r}
+##sum genus to family for Enterobacteriaceae
+keyword = 'f__Enterobacteriaceae'
+genus_key <- sapply(as.character(grep(keyword, rownames(pre_data1_remove), value = TRUE)), simp_names)
+t_pre_data1_remove_c_Entero <- colSums(apply(t_pre_data1_remove_c[,genus_key], 1, as.numeric))
+names(t_pre_data1_remove_c_Entero) == rownames(t_pre_data1_remove_c)
+plot_pre_data1 <- cbind((t_pre_data1_remove_c_Entero), t_pre_data1_remove_c[,c('pre_data1.cluster', 'Enterobacteriaceae_', 'Bacteroides')])
+colnames(plot_pre_data1) <- c('Enterobacteriaceae', 'pre_data1.cluster', 'Enterobacteriaceae_', 'Bacteroides')
+```
+
+
+```{r, fig.height=8}
+plot_pre_data11<- plot_pre_data1
+plot_pre_data11$pre_data1.cluster <- ifelse(plot_pre_data11$pre_data1.cluster == 'before1', 'ET_E', 'ET_B')
+plot_pre_data11$pre_data1.cluster <- factor(plot_pre_data11$pre_data1.cluster , levels=c('ET_E', 'ET_B'))
+
+p1<-ggviolin(plot_pre_data11, x="pre_data1.cluster", y="Enterobacteriaceae_", fill = "pre_data1.cluster",#fill = "", Enterobacteriaceae_
+             alpha = 0.8,  add.params = list(alpha=1), palette = c("#7A1D1E", "#C47737"), size = 0.8)+
+  stat_compare_means(comparisons = list(c('ET_E', 'ET_B')), method = 'wilcox.test', label = "p.signif", label.x = 1.5, label.y = 1, size=8)+
+  # yscale("log2", .format = FALSE)+
+  theme_classic()+theme(legend.position = "right")+xlab(label = '')+ylab("Log Abundance")+labs(title='Enterobacteriaceae;g__')+
+  theme(text=element_text(family ="sans", size=32), plot.title = element_text(size=34, hjust = 0.5, face = 'italic'), axis.text = element_text(size=32, color ='dimgray'), axis.title.x = element_text(size=34), axis.title.y = element_text(size=34), axis.ticks = element_blank())+
+  theme( aspect.ratio=2, 
+        legend.direction = 'horizontal', legend.position = c(5, .15), legend.background=element_rect(fill = NA)
+        ,panel.background = element_rect(fill = NA, colour = "lightgrey", size = 3)
+        ,axis.line=element_line(colour=NA, size = 0),axis.ticks.y = element_line(size=1.5, color ='dimgray'), axis.ticks.length = unit(7, "pt"))+
+    scale_y_log10(expand = expansion(add=c(0, 0.5)));p1
+
+ggsave(paste("./figure1/fig_s1_", fig1i, ".pdf", sep = ''), device = "pdf")
+fig1i = fig1i + 1
+
+p2<-ggviolin(plot_pre_data11, x="pre_data1.cluster", y="Bacteroides", fill = "pre_data1.cluster",#fill = "", 
+             alpha = 0.8,  add.params = list(alpha=1), palette = c("#7A1D1E", "#C47737"), size = 0.8)+
+  stat_compare_means(comparisons = list(c('ET_E', 'ET_B')), method = 'wilcox.test', label = "p.signif", label.x = 1.5, label.y = 1, size=8)+
+  # yscale("log2", .format = FALSE)+
+  theme_classic()+theme(legend.position = "right")+xlab(label = '')+ylab(" ")+labs(title='Bacteroides')+
+  theme(text=element_text(family ="sans", size=32), plot.title = element_text(size=34, hjust = 0.5, face = 'italic'), axis.text = element_text(size=32, color ='dimgray'), axis.title.x = element_text(size=34), axis.title.y = element_text(size=34), axis.ticks = element_blank())+
+  theme(aspect.ratio=2,
+        legend.direction = 'horizontal', legend.position = c(5, .15), legend.background=element_rect(fill = NA)
+        ,panel.background = element_rect(fill = NA, colour = "lightgrey", size = 3)
+        ,axis.line=element_line(colour=NA, size = 0),axis.ticks.y = element_line(size=1.5, color ='dimgray'), axis.ticks.length = unit(7, "pt"))+
+    scale_y_log10(expand = expansion(add=c(0, 0.5)));p2 #axis.title=element_text(size=21), 
+
+
+ggsave(paste("./figure1/fig_s1_", fig1i, ".pdf", sep = ''), device = "pdf")
+fig1i = fig1i + 1
+
+p3<-ggviolin(plot_pre_data11, x="pre_data1.cluster", y="Enterobacteriaceae", fill = "pre_data1.cluster",#fill = "", 
+             alpha = 0.8,  add.params = list(alpha=1), palette = c("#7A1D1E", "#C47737"), size = 0.8)+
+  stat_compare_means(comparisons = list(c('ET_E', 'ET_B')), method = 'wilcox.test', label = "p.signif", label.x = 1.5, label.y = 1, size=8)+
+  # yscale("log2", .format = FALSE)+
+  theme_classic()+theme(legend.position = "right")+xlab(label = '')+ylab(" ")+labs(title='Enterobacteriaceae')+
+  theme(text=element_text(family ="sans", size=32), plot.title = element_text(size=34, hjust = 0.5), axis.text = element_text(size=32, color ='dimgray'), axis.title.x = element_text(size=34), axis.title.y = element_text(size=34), axis.ticks = element_blank())+#, face = 'italic'
+  theme(aspect.ratio=2,
+        legend.direction = 'horizontal', legend.position = c(5, .15), legend.background=element_rect(fill = NA)
+        ,panel.background = element_rect(fill = NA, colour = "lightgrey", size = 3)
+        ,axis.line=element_line(colour=NA, size = 0),axis.ticks.y = element_line(size=1.5, color ='dimgray'), axis.ticks.length = unit(7, "pt"))+
+    scale_y_log10(expand = expansion(add=c(0, 0.5)));p3 #axis.title=element_text(size=21), 
+
+
+ggsave(paste("./figure1/fig_s1_", fig1i, ".pdf", sep = ''), device = "pdf")
+fig1i = fig1i + 1
+```
+```{r}
+## Enterotype in CDI & IBD
+
+```
+```{r}
+##before
+pre_data0 <- L6_rela_fil_sAg_others[,unique(c(meta_fil_config$Previous_sra))]/1000
+
+# head(colSums(pre_data0))
+
+pre_data0_remove = noise.removal(pre_data0, percent=0.01)
+pre_data0.dist=dist.JSD(pre_data0_remove)
+
+require(clusterSim)
+
+pre_nclusters=NULL
+for (k in 1:10) { 
+  if (k==1) {
+    pre_nclusters[k]=NA 
+  } else {
+    pre_data0.cluster_temp=pam.clustering(pre_data0.dist, k)
+    pre_nclusters[k]=index.G1(t(pre_data0_remove), pre_data0.cluster_temp,  d = pre_data0.dist,
+                          centrotypes = "centroids")#medoids
+  }
+}
+```
+```{r}
+plot(pre_nclusters, type="b", xlab="k clusters", ylab="CH index",main="Optimal number of clusters")
+pdf(file='./figure1/1main_combine_class.pdf')
+plot(pre_nclusters, type="b", xlab="Number of clusters", ylab="CH index")
+dev.off()
+```
+
+
+```{r, fig.height=8}
+
+pre_data0.cluster=pam.clustering(pre_data0.dist, k=2)
+
+pre_obs.silhouette=mean(silhouette(pre_data0.cluster, pre_data0.dist)[,3])
+cat(pre_obs.silhouette) #0.1899451
+
+pre_obs.pcoa=dudi.pco(pre_data0.dist, scannf=F, nf=2)
+
+##pcoa
+
+PCo1 <- pre_obs.pcoa$li[ ,1]
+PCo2 = pre_obs.pcoa$li[ ,2]
+
+library(ggplot2)
+
+Groupn<-'postfmt'
+
+sample.groups <- 1
+
+adonis(pre_data0.dist ~ pre_data0.cluster, permutations = 999)
+
+plotdata <- data.frame(rownames(pre_obs.pcoa$li),PCo1,PCo2, sample.groups, pre_data0.cluster)
+colnames(plotdata) <-c("sample","PCo1","PCo2","group", "data.cluster")
+pc1 <-floor(pre_obs.pcoa$eig[1]*10000/sum(pre_obs.pcoa$eig))/100
+pc2 <-floor(pre_obs.pcoa$eig[2]*10000/sum(pre_obs.pcoa$eig))/100
+
+p<-ggplot(plotdata, alpha=I(0.8))+
+  theme_classic()+
+  stat_ellipse(aes(x=PCo1, y=PCo2, colour=as.factor(data.cluster),
+                   group=as.factor(data.cluster)), level=0.9, size=1.5, show.legend = NA)+
+  labs(title=paste("CDI & IBD patients (N=", length(PCo1),")"), x=paste("PCo1(",pc1,"%)"),y=paste("PCo2(",pc2,"%)") , colour="Cluster")+
+  geom_point(aes(x=PCo1,y=PCo2, colour=as.factor(data.cluster), shape=factor(sample.groups),
+                 alpha = factor(sample.groups)),size=4)+
+  theme(text=element_text(family ="sans", size=32), plot.title = element_text(size=34, hjust = 0.5), axis.text = element_text(size=32, color ='dimgray'), axis.title.x = element_text(size=34), axis.title.y = element_text(size=34), axis.ticks = element_blank())+
+  theme(aspect.ratio=1, legend.position = c(4, .65), legend.background=element_rect(fill = NA), legend.text = element_text(size=18))+
+  scale_colour_manual(values=c("#7A1D1E", "#C47737", "#E7A600"))+
+  scale_alpha_manual(values = c(0.8))+
+  theme(panel.background = element_rect(fill = NA, colour = "lightgrey", size = 3)
+        ,axis.line=element_line(colour=NA, size = 0),axis.ticks = element_line(size=1.5, color ='dimgray'), axis.ticks.length = unit(7, "pt"));p
+
+ggsave(paste("./figure1/1main_", fig1i, ".pdf", sep = ''), device = "pdf")
+fig1i = fig1i + 1
+
+
+beofre_entro <- cbind(rownames(pre_obs.pcoa$li), paste(rep('before', length(pre_data0.cluster)), pre_data0.cluster, sep = ''), meta_fil_config[match(rownames(pre_obs.pcoa$li), meta_fil_config$Previous_sra), 'PRJ'])
+
+```
+```{r}
+library(coin)
+pre_data0.cluster <- beofre_entro[,2]
+pre_data0.prj <- beofre_entro[,3]
+
+# options(stringsAsFactors = FALSE)
+pre_simp_name <- sapply(as.character(rownames(pre_data0_remove)), simp_names)
+pre_data0_remove_dat <- data.frame(pre_data0_remove, stringsAsFactors = F)
+pre_data0_remove_c <- as.data.frame(rbind(pre_data0_remove_dat/100 + 1e-5, pre_data0.cluster, pre_data0.prj), stringsAsFactors =F)
+rownames(pre_data0_remove_c) <- c(pre_simp_name, 'pre_data0.cluster', 'pre_data0.prj')
+t_pre_data0_remove<-t(pre_data0_remove_c)
+t_pre_data0_remove_c <- as.data.frame(t_pre_data0_remove, stringsAsFactors = F)
+
+t_pre_data0_remove_c$pre_data0.cluster <- as.factor(as.character(t_pre_data0_remove_c$pre_data0.cluster))
+t_pre_data0_remove_c$pre_data0.prj <- as.factor(t_pre_data0_remove_c$pre_data0.prj)
+
+t_pre_data0_remove_c$Enterobacteriaceae_ <- as.numeric(t_pre_data0_remove_c$Enterobacteriaceae_)
+wilcox_test(Enterobacteriaceae_ ~ pre_data0.cluster| pre_data0.prj, t_pre_data0_remove_c)
+
+t_pre_data0_remove_c$Bacteroides <- as.numeric(t_pre_data0_remove_c$Bacteroides)
+wilcox_test(Bacteroides ~ pre_data0.cluster| pre_data0.prj, t_pre_data0_remove_c)
+```
+
+
+```{r}
+##sum genus to family for Enterobacteriaceae
+keyword = 'f__Enterobacteriaceae'
+genus_key <- sapply(as.character(grep(keyword, rownames(pre_data0_remove), value = TRUE)), simp_names)
+t_pre_data0_remove_c_Entero <- colSums(apply(t_pre_data0_remove_c[,genus_key], 1, as.numeric))
+names(t_pre_data0_remove_c_Entero) == rownames(t_pre_data0_remove_c)
+plot_pre_data0 <- cbind((t_pre_data0_remove_c_Entero), t_pre_data0_remove_c[,c('pre_data0.cluster', 'Enterobacteriaceae_', 'Bacteroides')])
+colnames(plot_pre_data0) <- c('Enterobacteriaceae', 'pre_data0.cluster', 'Enterobacteriaceae_', 'Bacteroides')
+```
+
+```{r, fig.height=8}
+plot_pre_data01<- plot_pre_data0
+plot_pre_data01$pre_data0.cluster <- ifelse(plot_pre_data01$pre_data0.cluster == 'before1', 'ET_E', 'ET_B')
+plot_pre_data01$pre_data0.cluster <- factor(plot_pre_data01$pre_data0.cluster , levels=c('ET_E', 'ET_B'))
+
+p1<-ggviolin(plot_pre_data01, x="pre_data0.cluster", y="Enterobacteriaceae_", fill = "pre_data0.cluster",#fill = "", Enterobacteriaceae_
+             alpha = 0.8,  add.params = list(alpha=1), palette = c("#7A1D1E", "#C47737"), size = 0.8)+
+  stat_compare_means(comparisons = list(c('ET_E', 'ET_B')), method = 'wilcox.test', label = "p.signif", label.x = 1.5, label.y = 1, size=8)+
+  # yscale("log2", .format = FALSE)+
+  theme_classic()+theme(legend.position = "right")+xlab(label = '')+ylab("Log Abundance")+labs(title='Enterobacteriaceae;g__')+
+  theme(text=element_text(family ="sans", size=32), plot.title = element_text(size=34, hjust = 0.5, face = 'italic'), axis.text = element_text(size=32, color ='dimgray'), axis.title.x = element_text(size=34), axis.title.y = element_text(size=34), axis.ticks = element_blank())+
+  theme( aspect.ratio=2, 
+        legend.direction = 'horizontal', legend.position = c(5, .15), legend.background=element_rect(fill = NA)
+        ,panel.background = element_rect(fill = NA, colour = "lightgrey", size = 3)
+        ,axis.line=element_line(colour=NA, size = 0),axis.ticks.y = element_line(size=1.5, color ='dimgray'), axis.ticks.length = unit(7, "pt"))+
+    scale_y_log10(expand = expansion(add=c(0, 0.5)));p1
+
+ggsave(paste("./figure1/fig_s1_", fig1i, ".pdf", sep = ''), device = "pdf")
+fig1i = fig1i + 1
+
+p2<-ggviolin(plot_pre_data01, x="pre_data0.cluster", y="Bacteroides", fill = "pre_data0.cluster",#fill = "", 
+             alpha = 0.8,  add.params = list(alpha=1), palette = c("#7A1D1E", "#C47737"), size = 0.8)+
+  stat_compare_means(comparisons = list(c('ET_E', 'ET_B')), method = 'wilcox.test', label = "p.signif", label.x = 1.5, label.y = 1, size=8)+
+  # yscale("log2", .format = FALSE)+
+  theme_classic()+theme(legend.position = "right")+xlab(label = '')+ylab(" ")+labs(title='Bacteroides')+
+  theme(text=element_text(family ="sans", size=32), plot.title = element_text(size=34, hjust = 0.5, face = 'italic'), axis.text = element_text(size=32, color ='dimgray'), axis.title.x = element_text(size=34), axis.title.y = element_text(size=34), axis.ticks = element_blank())+
+  theme(aspect.ratio=2,
+        legend.direction = 'horizontal', legend.position = c(5, .15), legend.background=element_rect(fill = NA)
+        ,panel.background = element_rect(fill = NA, colour = "lightgrey", size = 3)
+        ,axis.line=element_line(colour=NA, size = 0),axis.ticks.y = element_line(size=1.5, color ='dimgray'), axis.ticks.length = unit(7, "pt"))+
+    scale_y_log10(expand = expansion(add=c(0, 0.5)));p2 #axis.title=element_text(size=21), 
+
+
+ggsave(paste("./figure1/fig_s1_", fig1i, ".pdf", sep = ''), device = "pdf")
+fig1i = fig1i + 1
+
+p3<-ggviolin(plot_pre_data01, x="pre_data0.cluster", y="Enterobacteriaceae", fill = "pre_data0.cluster",#fill = "", 
+             alpha = 0.8,  add.params = list(alpha=1), palette = c("#7A1D1E", "#C47737"), size = 0.8)+
+  stat_compare_means(comparisons = list(c('ET_E', 'ET_B')), method = 'wilcox.test', label = "p.signif", label.x = 1.5, label.y = 1, size=8)+
+  # yscale("log2", .format = FALSE)+
+  theme_classic()+theme(legend.position = "right")+xlab(label = '')+ylab(" ")+labs(title='Enterobacteriaceae')+
+  theme(text=element_text(family ="sans", size=32), plot.title = element_text(size=34, hjust = 0.5), axis.text = element_text(size=32, color ='dimgray'), axis.title.x = element_text(size=34), axis.title.y = element_text(size=34), axis.ticks = element_blank())+#, face = 'italic'
+  theme(aspect.ratio=2,
+        legend.direction = 'horizontal', legend.position = c(5, .15), legend.background=element_rect(fill = NA)
+        ,panel.background = element_rect(fill = NA, colour = "lightgrey", size = 3)
+        ,axis.line=element_line(colour=NA, size = 0),axis.ticks.y = element_line(size=1.5, color ='dimgray'), axis.ticks.length = unit(7, "pt"))+
+    scale_y_log10(expand = expansion(add=c(0, 0.5)));p3 #axis.title=element_text(size=21), 
+
+
+ggsave(paste("./figure1/fig_s1_", fig1i, ".pdf", sep = ''), device = "pdf")
+fig1i = fig1i + 1
+```
+
+```{r}
+##dominat bar plot
+plot_pre_data02 <- plot_pre_data0
+plot_pre_data02$pre_data0.cluster <- ifelse(plot_pre_data02$pre_data0.cluster == 'before1', 'ET_E', 'ET_B')
+plot_pre_data02$pre_data0.cluster <- factor(plot_pre_data02$pre_data0.cluster , levels=c('ET_E', 'ET_B'))
+
+plot_pre_data02$sample <- rownames(plot_pre_data02)
+plot_pre_data02$Enterobacteriaceae_ <- as.numeric(plot_pre_data02$Enterobacteriaceae_)
+plot_pre_data02$Bacteroides <- as.numeric(plot_pre_data02$Bacteroides)
+plot_pre_data02$Others <- 1 - (plot_pre_data02$Enterobacteriaceae_ + plot_pre_data02$Bacteroides)
+
+tmp = meta_fil_config1[,c('Previous_sra', 'Diease1')]
+colnames(tmp) <- c('sample', 'Diease1')
+tmp[tmp$Diease1 %in% c('CD', 'UC'), 'Diease1'] <- 'IBD'
+plot_pre_data02 <- merge(plot_pre_data02, tmp, by='sample')
+
+
+plot_pre_data02$pre_data0.cluster <- factor(plot_pre_data02$pre_data0.cluster, levels = c('ET_E', 'ET_B'))
+plot_pre_data02$Diease1 <- factor(plot_pre_data02$Diease1, levels = c('CDI', 'IBD'))
+
+plot_pre_data02_eb <- plot_pre_data02[order((3*as.numeric(plot_pre_data02$pre_data0.cluster) +  ifelse(plot_pre_data02$pre_data0.cluster == 'ET_E', 1-as.numeric(plot_pre_data02$Enterobacteriaceae_), as.numeric(plot_pre_data02$Bacteroides)))),] #as.numeric(plot_pre_data02$Diease1)
+
+
+library(reshape2)
+plot_pre_data02_eb_melt <- melt(plot_pre_data02_eb, measure.vars = c('Enterobacteriaceae_', 'Bacteroides', 'Others'))
+plot_pre_data02_eb_melt$variable <- factor(plot_pre_data02_eb_melt$variable, levels = rev(c('Enterobacteriaceae_', 'Bacteroides', 'Others')))
+
+
+plot_pre_data02_eb_melt$sample <- factor(plot_pre_data02_eb_melt$sample, levels = unique(plot_pre_data02_eb_melt$sample))
+
+```
+```{r, fig.height=8}
+p1<- ggplot(plot_pre_data02_eb_melt, aes(x=sample, y=value, fill=variable))+
+  geom_bar(stat="identity", width = 1)+
+  # geom_hline(yintercept = 0.05, size=1.5, linetype=2)+
+  # geom_vline(xintercept = sum(t_pre_data0_remove_c_eb_melt$pre_data0.cluster == 'ET_E')/3, )+
+  labs(x= c(''), y=c('Relative abundance'), title = c(''))+
+    scale_fill_manual(values=c('white', "#C47737", "#7A1D1E", '#C6832A', '#962E2B',   '#4E86C6', '#E7A600', "#4D9127", "#90908D", "#962E2B", "#4E86C6", "#4D9127", "#90908D", 'lightgrey'))+
+  theme(text=element_text(family ="sans", size=32), plot.title = element_text(size=34, hjust = 0.5), axis.text = element_text(size=32, color ='dimgray'), axis.text.x = element_blank(), axis.title.x = element_text(size=34), axis.title.y = element_text(size=34), axis.ticks.y = element_line(size=1.5, color ='dimgray'), axis.ticks.length = unit(7, "pt"), axis.ticks=element_blank())+
+ theme(aspect.ratio = 0.618, legend.background=element_blank(), legend.position=c(1.75, 0.6)
+       ,panel.background = element_rect(fill = NA, colour = "NA", size = 3)#lightgrey
+       ,axis.line=element_line(colour="NA")
+       ,legend.key = element_rect(fill = NA, color = NA), panel.border = element_blank(), panel.grid = element_blank())+
+   guides(colour = guide_legend(override.aes = list(size=5)));
+
+
+```
+```{r, fig.height=8}
+p2<-ggplot(plot_pre_data02_eb_melt)+
+    geom_bar(mapping = aes(x = sample, y = 1, fill = Diease1), 
+       stat = "identity", 
+       width = 1)+
+      theme_void()+
+    scale_fill_manual(values=c("#D78774", "#FCBA7F"))+
+      theme(panel.spacing.x = unit(1, "mm"), aspect.ratio = 0.02);
+
+p3<-ggplot(plot_pre_data02_eb_melt)+
+    geom_bar(mapping = aes(x = sample, y = 1, fill = pre_data0.cluster), 
+       stat = "identity", 
+       width = 1)+
+      theme_void()+
+    scale_fill_manual(values=c("#7A1D1E", "#C47737"))+
+      theme(panel.spacing.x = unit(1, "mm"), aspect.ratio = 0.02)
+
+ggpubr::ggarrange(p1, p2, p3, ncol = 1, nrow = 3, common.legend = TRUE, heights = c(1, 0.03, 0.03))
+ggsave("./figure1/1main_two_dominate_genus.pdf", device = 'pdf')
+```
+
+
+```{r}
+##DMM
+library(DirichletMultinomial)
+full <- FALSE
+.qualitative <- DirichletMultinomial:::.qualitative
+
+pre_data_dmn <- L6_rela_fil_sAg_others[,unique(c(meta_fil_config$Previous_sra))]/1000
+# pre_data0 <- L6_rela_fil_sAg_others[,unique(c(meta_fil_config[!meta_fil_config$Diease1 %in% c('CDI'), c('Previous_sra')]))]/100000
+# head(colSums(pre_data_dmn))
+
+pre_data_dmn_remove = noise.removal(pre_data_dmn, percent=0.01)
+pre_data_dmn.dist=dist.JSD(pre_data_dmn_remove)
+
+fit <- mclapply(1:7, dmn, count=t(pre_data_dmn_remove), verbose=TRUE)
+
+lplc <- sapply(fit, laplace)
+ # laplace goodness of fit
+plot(lplc, type="b", xlab="Number of Dirichlet Components",
+     ylab="Model Fit")
+
+
+```
+```{r}
+pdf(file='./figure1/1main_dmn_class.pdf')
+plot(lplc, type="b", xlab="Number of Dirichlet Components",
+     ylab="Model Fit")
+dev.off()
+```
+
+```{r}
+best <- fit[[which.min(unlist(lplc))]]
+ass <- apply(mixture(best), 1, which.max)
+
+
+```
+
+```{r, fig.height=8}
+pre_obs.pcoa_dmn=dudi.pco(pre_data_dmn.dist, scannf=F, nf=2)
+# s.class(pre_obs.pcoa$li, fac=as.factor(pre_data0.cluster), grid=F,sub="Principal coordiante analysis")
+
+##pcoa
+
+PCo1 <- pre_obs.pcoa_dmn$li[ ,1]
+PCo2 = pre_obs.pcoa_dmn$li[ ,2]
+
+library(ggplot2)
+# rownames(pre_obs.pcoa$li) == pre_sra_u[,"SRA"]
+
+Groupn<-'postfmt'
+# pre_sra_u[is.na(pre_sra_u[, Groupn]), Groupn]='NA'
+# sample.groups = factor(pre_sra_u[,Groupn], levels=c('response', 'failure', 'NA'))
+sample.groups <- 1
+#Groupn<-'Diease'
+#sample.groups = factor(pre_sra_u[,Groupn])
+
+adonis(pre_data_dmn.dist ~ ass, permutations = 999)
+
+plotdata_dmn <- data.frame(rownames(pre_obs.pcoa_dmn$li),PCo1,PCo2, sample.groups, ass)
+colnames(plotdata_dmn) <-c("sample","PCo1","PCo2","group", "data.cluster")
+pc1 <-floor(pre_obs.pcoa_dmn$eig[1]*10000/sum(pre_obs.pcoa_dmn$eig))/100
+pc2 <-floor(pre_obs.pcoa_dmn$eig[2]*10000/sum(pre_obs.pcoa_dmn$eig))/100
+#sample.groups <- pre_sra_u[,Groupn]
+#shape=factor(substr(pre_sra_u[,Groupn], 1, 1))
+
+p<-ggplot(plotdata_dmn, alpha=I(0.8))+
+  theme_classic()+
+  stat_ellipse(aes(x=PCo1, y=PCo2, colour=as.factor(data.cluster),
+                   group=as.factor(data.cluster)), level=0.9, size=1.5, show.legend = NA)+
+  labs(title=paste("CDI & IBD patients (n = ", length(PCo1),")", sep=''), x=paste("PCo1(",pc1,"%)"),y=paste("PCo2(",pc2,"%)") , colour="Cluster")+
+  geom_point(aes(x=PCo1,y=PCo2, colour=as.factor(data.cluster), shape=factor(sample.groups),
+                 alpha = factor(sample.groups)),size=4)+
+  # theme(plot.title = element_text(size=21, hjust = 0.5),
+  #     # title=element_text(family ="sans", size=21),
+  #       text=element_text(family ="sans", size=18),aspect.ratio=0.95)+
+  theme(text=element_text(family ="sans", size=32), plot.title = element_text(size=34, hjust = 0.5), axis.text = element_text(size=32, color ='dimgray'), axis.title.x = element_text(size=34), axis.title.y = element_text(size=34), axis.ticks = element_blank())+
+  theme(aspect.ratio=1, legend.position = c(4, .65), legend.background=element_rect(fill = NA), legend.text = element_text(size=18))+
+  scale_colour_manual(values=c("#7A1D1E", "#C47737", "#E7A600"))+
+  scale_alpha_manual(values = c(0.8))+
+  theme(panel.background = element_rect(fill = NA, colour = "lightgrey", size = 3)
+        ,axis.line=element_line(colour=NA, size = 0),axis.ticks = element_line(size=1.5, color ='dimgray'), axis.ticks.length = unit(7, "pt"));p
+
+ggsave(paste("./figure1/1main_dmn", fig1i, ".pdf", sep = ''), device = "pdf")
+fig1i = fig1i + 1
+
+```
+```{r}
+##diff genera
+library(coin)
+# pre_obs.pcoa_dmn
+pre_data_dmm.cluster <- paste('before', ass, sep = '')
+pre_data_dmm.prj <- beofre_entro[,3]
+
+
+pre_data_dmm_remove <- pre_data_dmn_remove
+pre_simp_name <- sapply(as.character(rownames(pre_data_dmm_remove)), simp_names)
+pre_data_dmm_remove_dat <- data.frame(pre_data_dmm_remove, stringsAsFactors = F)
+pre_data_dmm_remove_c <- as.data.frame(rbind(pre_data_dmm_remove_dat + 1e-5, pre_data_dmm.cluster, pre_data_dmm.prj), stringsAsFactors =F)
+rownames(pre_data_dmm_remove_c) <- c(pre_simp_name, 'pre_data_dmm.cluster', 'pre_data_dmm.prj')
+t_pre_data_dmm_remove<-t(pre_data_dmm_remove_c)
+t_pre_data_dmm_remove_c <- as.data.frame(t_pre_data_dmm_remove, stringsAsFactors = F)
+
+t_pre_data_dmm_remove_c$pre_data_dmm.cluster <- as.factor(as.character(t_pre_data_dmm_remove_c$pre_data_dmm.cluster))
+t_pre_data_dmm_remove_c$pre_data_dmm.prj <- as.factor(t_pre_data_dmm_remove_c$pre_data_dmm.prj)
+
+t_pre_data_dmm_remove_c$Enterobacteriaceae_ <- as.numeric(t_pre_data_dmm_remove_c$Enterobacteriaceae_)
+wilcox_test(Enterobacteriaceae_ ~ pre_data_dmm.cluster| pre_data_dmm.prj, t_pre_data_dmm_remove_c)
+
+t_pre_data_dmm_remove_c$Bacteroides <- as.numeric(t_pre_data_dmm_remove_c$Bacteroides)
+wilcox_test(Bacteroides ~ pre_data_dmm.cluster| pre_data_dmm.prj, t_pre_data_dmm_remove_c)
+```
+
+
+```{r}
+##sum genus to family for Enterobacteriaceae
+keyword = 'f__Enterobacteriaceae'
+genus_key <- sapply(as.character(grep(keyword, rownames(pre_data_dmm_remove), value = TRUE)), simp_names)
+t_pre_data_dmm_remove_c_Entero <- colSums(apply(t_pre_data_dmm_remove_c[,genus_key], 1, as.numeric))
+names(t_pre_data_dmm_remove_c_Entero) == rownames(t_pre_data_dmm_remove_c)
+plot_pre_data_dmm <- cbind((t_pre_data_dmm_remove_c_Entero)/100, t_pre_data_dmm_remove_c[,c('pre_data_dmm.cluster')], t_pre_data_dmm_remove_c[,c( 'Enterobacteriaceae_', 'Bacteroides')]/100)
+colnames(plot_pre_data_dmm) <- c('Enterobacteriaceae', 'pre_data_dmm.cluster', 'Enterobacteriaceae_', 'Bacteroides')
+```
+
+```{r, fig.height=8}
+plot_pre_data_dmm1<- plot_pre_data_dmm
+plot_pre_data_dmm1$pre_data_dmm.cluster <- ifelse(plot_pre_data_dmm1$pre_data_dmm.cluster == 'before1', 'ET_E', 'ET_B')
+plot_pre_data_dmm1$pre_data_dmm.cluster <- factor(plot_pre_data_dmm1$pre_data_dmm.cluster , levels=c('ET_E', 'ET_B'))
+
+p1<-ggviolin(plot_pre_data_dmm1, x="pre_data_dmm.cluster", y="Enterobacteriaceae_", fill = "pre_data_dmm.cluster",#fill = "", Enterobacteriaceae_
+             alpha = 0.8,  add.params = list(alpha=1), palette = c("#7A1D1E", "#C47737"), size = 0.8)+
+  stat_compare_means(comparisons = list(c('ET_E', 'ET_B')), method = 'wilcox.test', label = "p.signif", label.x = 1.5, label.y = 1, size=8)+
+  # yscale("log2", .format = FALSE)+
+  theme_classic()+theme(legend.position = "right")+xlab(label = '')+ylab("Log Abundance")+labs(title='Enterobacteriaceae;g__')+
+  theme(text=element_text(family ="sans", size=32), plot.title = element_text(size=34, hjust = 0.5, face = 'italic'), axis.text = element_text(size=32, color ='dimgray'), axis.title.x = element_text(size=34), axis.title.y = element_text(size=34), axis.ticks = element_blank())+
+  theme( aspect.ratio=2, 
+        legend.direction = 'horizontal', legend.position = c(5, .15), legend.background=element_rect(fill = NA)
+        ,panel.background = element_rect(fill = NA, colour = "lightgrey", size = 3)
+        ,axis.line=element_line(colour=NA, size = 0),axis.ticks.y = element_line(size=1.5, color ='dimgray'), axis.ticks.length = unit(7, "pt"))+
+    scale_y_log10(expand = expansion(add=c(0, 0.5)));p1
+
+ggsave(paste("./figure1/fig_s1_dmm", 'fig1i1', ".pdf", sep = ''), device = "pdf")
+
+
+p2<-ggviolin(plot_pre_data_dmm1, x="pre_data_dmm.cluster", y="Bacteroides", fill = "pre_data_dmm.cluster",#fill = "", 
+             alpha = 0.8,  add.params = list(alpha=1), palette = c("#7A1D1E", "#C47737"), size = 0.8)+
+  stat_compare_means(comparisons = list(c('ET_E', 'ET_B')), method = 'wilcox.test', label = "p.signif", label.x = 1.5, label.y = 1, size=8)+
+  # yscale("log2", .format = FALSE)+
+  theme_classic()+theme(legend.position = "right")+xlab(label = '')+ylab(" ")+labs(title='Bacteroides')+
+  theme(text=element_text(family ="sans", size=32), plot.title = element_text(size=34, hjust = 0.5, face = 'italic'), axis.text = element_text(size=32, color ='dimgray'), axis.title.x = element_text(size=34), axis.title.y = element_text(size=34), axis.ticks = element_blank())+
+  theme(aspect.ratio=2,
+        legend.direction = 'horizontal', legend.position = c(5, .15), legend.background=element_rect(fill = NA)
+        ,panel.background = element_rect(fill = NA, colour = "lightgrey", size = 3)
+        ,axis.line=element_line(colour=NA, size = 0),axis.ticks.y = element_line(size=1.5, color ='dimgray'), axis.ticks.length = unit(7, "pt"))+
+    scale_y_log10(expand = expansion(add=c(0, 0.5)));p2 #axis.title=element_text(size=21), 
+
+
+ggsave(paste("./figure1/fig_s1_dmm", 'fig1i2', ".pdf", sep = ''), device = "pdf")
+
+
+p3<-ggviolin(plot_pre_data_dmm1, x="pre_data_dmm.cluster", y="Enterobacteriaceae", fill = "pre_data_dmm.cluster",#fill = "", 
+             alpha = 0.8,  add.params = list(alpha=1), palette = c("#7A1D1E", "#C47737"), size = 0.8)+
+  stat_compare_means(comparisons = list(c('ET_E', 'ET_B')), method = 'wilcox.test', label = "p.signif", label.x = 1.5, label.y = 1, size=8)+
+  # yscale("log2", .format = FALSE)+
+  theme_classic()+theme(legend.position = "right")+xlab(label = '')+ylab(" ")+labs(title='Enterobacteriaceae')+
+  theme(text=element_text(family ="sans", size=32), plot.title = element_text(size=34, hjust = 0.5), axis.text = element_text(size=32, color ='dimgray'), axis.title.x = element_text(size=34), axis.title.y = element_text(size=34), axis.ticks = element_blank())+#, face = 'italic'
+  theme(aspect.ratio=2,
+        legend.direction = 'horizontal', legend.position = c(5, .15), legend.background=element_rect(fill = NA)
+        ,panel.background = element_rect(fill = NA, colour = "lightgrey", size = 3)
+        ,axis.line=element_line(colour=NA, size = 0),axis.ticks.y = element_line(size=1.5, color ='dimgray'), axis.ticks.length = unit(7, "pt"))+
+    scale_y_log10(expand = expansion(add=c(0, 0.5)));p3 #axis.title=element_text(size=21), 
+
+
+ggsave(paste("./figure1/fig_s1_dmm", 'fig1i3', ".pdf", sep = ''), device = "pdf")
+
+```
+
+```{r}
+##intersect between all and seperate clustering
+##beofre_entro  beofre_entro_cdi  beofre_entro_ibd
+beofre_entro_seprate <- rbind(beofre_entro_cdi, beofre_entro_ibd)
+colnames(beofre_entro_seprate) <- c('names', 'sep', 'PRJ')
+
+
+non_variation_entero_id <- c(intersect(beofre_entro[beofre_entro[,2] %in% c('before1'),1], beofre_entro_cdi[beofre_entro_cdi[,2] %in% c('before1'),1]),
+                             intersect(beofre_entro[beofre_entro[,2] %in% c('before2'),1], beofre_entro_cdi[beofre_entro_cdi[,2] %in% c('before2'),1]), 
+                             intersect(beofre_entro[beofre_entro[,2] %in% c('before1'),1], beofre_entro_ibd[beofre_entro_ibd[,2] %in% c('before1'),1]), 
+                             intersect(beofre_entro[beofre_entro[,2] %in% c('before2'),1], beofre_entro_ibd[beofre_entro_ibd[,2] %in% c('before2'),1]))
+
+```
+```{r}
+entero_dmn <- data.frame(sra = names(ass), dmm = ass)
+entero_merged <- merge(merge(entero_dmn, beofre_entro, by.y='V1', by.x='sra'), beofre_entro_seprate, by.x='sra', by.y='names')
+entero_merged$dmm <- ifelse(entero_merged$dmm %in% 1, 'before1', 'before2')
+
+entero_merged <- entero_merged[order((3*as.numeric(entero_merged$V2) + ifelse(entero_merged$V2 != entero_merged$sep & entero_merged$V2 != entero_merged$dmm, 2, ifelse(entero_merged$V2 != entero_merged$sep, 1, ifelse(entero_merged$V2 != entero_merged$dmm, 0.5,0))) )),]
+
+entero_merged$sra <- factor(entero_merged$sra, levels = entero_merged$sra)
+```
+
+```{r}
+##add variable 
+
+entero_merged$dmm_c <- ifelse(entero_merged$dmm == entero_merged$V2, entero_merged$dmm, 'variable')
+entero_merged$sep_c <- ifelse(entero_merged$sep == entero_merged$V2, entero_merged$sep, 'variable')
+
+
+```
+
+
+```{r}
+pp1<-ggplot(entero_merged)+
+    geom_bar(mapping = aes(x = sra, y = 1, fill = sep_c), 
+       stat = "identity", 
+       width = 1)+
+      theme_void()+
+        scale_fill_manual(values=c("#7A1D1E", "#C47737", '#939292'))+
+      theme(panel.spacing.x = unit(1, "mm"), aspect.ratio = 0.03)
+
+pp2<-ggplot(entero_merged)+
+    geom_bar(mapping = aes(x = sra, y = 1, fill = V2), 
+       stat = "identity", 
+       width = 1)+
+      theme_void()+
+    scale_fill_manual(values=c("#7A1D1E", "#C47737"))+
+      theme(panel.spacing.x = unit(1, "mm"), aspect.ratio = 0.03)
+pp3<-ggplot(entero_merged)+
+    geom_bar(mapping = aes(x = sra, y = 1, fill = dmm_c),
+       stat = "identity", 
+       width = 1)+
+      theme_void()+
+    scale_fill_manual(values=c("#7A1D1E", "#C47737", '#939292'))+
+      theme(panel.spacing.x = unit(1, "mm"), aspect.ratio = 0.03)
+
+ggpubr::ggarrange(pp1, pp2, pp3, ncol = 1, nrow = 3, common.legend = TRUE, heights = c(1, 1, 1))
+ggsave("./figure1/1main_unchanged.pdf", device = 'pdf')
+```
+
+
+```{r, fig.height=8}
+##differential genera
+diff_entero_list <- diff_entro_all[order(diff_entro_all$diff_qvalue<0.05),]
+
+library(ggbeeswarm)
+library(ggpubr)
+library(coin)
+library(reshape2)
+###marked genus in response come from donor
+#genus: L6_rela_fil_sAg_remove L6_rela_fil_sAg_remove_simp
+#config: meta_fil_config1_na 
+#
+
+# response_abundance <- function(pre_entro){
+    ###marked genus in after response group
+    # pre_entro<-'before2'
+    tmp_after_response <- meta_fil_config1_na[meta_fil_config1_na$pre_entro %in% c(pre_entro), c('SRA_Sample', 'postfmt_symptoms', 'PRJ')]
+
+    L6_rela_fil_sAg_remove_simp_after <- L6_rela_fil_sAg_remove_simp[,tmp_after_response$SRA_Sample]
+    
+    # cols <- ncol(feature_abun_dat)
+    group <- tmp_after_response$postfmt_symptoms
+    prj <- tmp_after_response$PRJ
+    seq(0.1, 0.9, 0.05) -> quan
+
+    tmp_pval <- apply(L6_rela_fil_sAg_remove_simp_after, 1, function(x){
+        pt <-  as.data.frame(cbind(x, group, prj))
+        colnames(pt)<-c('nx', 'group', 'prj')
+        # upt <- unique(pt)
+        upt <- pt
+        prj_list <- upt$prj
+        list <- NULL
+        for(i in unique(prj_list)){
+            if (length(prj_list[prj_list %in% i]) > 2){
+                list <- c(list, i)
+            }
+        }
+        upt <- upt[upt$prj %in% list,]
+        upt$nx <- as.numeric(as.character(upt$nx))
+        tmp_test <- wilcox_test(nx ~ group | prj, upt)
+        pval_a <- 1
+        pval_a <- pvalue(tmp_test)
+        if(is.na(pval_a)){pval_a<-1}
+        a_nx <- upt[upt$group %in% c('response'), 'nx']
+        p_nx <- upt[upt$group %in% c('failure'), 'nx']
+        case <- quantile(log10(a_nx + 0.0001), quan)
+        control <- quantile(log10(p_nx+ 0.0001), quan)
+        gfc <- sum((case - control))/length(quan)
+        return(c(pval_a, gfc))
+    })
+   
+    ###select marked genus qvalue<0.05, and combine abundance
+    tmp_pval_t <- data.frame(t(tmp_pval))
+    colnames(tmp_pval_t) <- c('pval', 'gfc')
+    # tmp_pval_t$id <- rownames(tmp_pval_t)
+    # entero_diff_t$pval <- as.numeric(as.character(entero_diff_t$pval))
+    tmp_qvalue <- p.adjust(tmp_pval_t$pval, method='fdr')
+    tmp_pval_adjust <- cbind(tmp_pval_t, tmp_qvalue)
+    tmp_pval_adjust05 <- tmp_pval_adjust[tmp_pval_adjust$tmp_qvalue < 0.05,]#tmp_qvalue < 0.05,]
+    
+    tmp_L6_05 <- L6_rela_fil_sAg_remove_simp[rownames(tmp_pval_adjust05),]
+    tmp_L6_after_05 <- L6_rela_fil_sAg_remove_simp_after[rownames(tmp_pval_adjust05),]
+    
+    #tmp_L6_after_05  tmp_pval_adjust05
+    #tmp_after_response
+    mean_after_response <- apply(tmp_L6_after_05[,tmp_after_response$postfmt_symptoms %in% c('response')], 1, function(x){(mean(x))})#quantile((x + 0.0001), quan)
+    mean_after_failure <- apply(tmp_L6_after_05[,tmp_after_response$postfmt_symptoms %in% c('failure')], 1, function(x){(mean(x))})
+    plot_after_response <- as.data.frame(cbind(rownames(tmp_L6_after_05), as.numeric((mean_after_response)), as.numeric((mean_after_failure))), stringsAsFactors = F)
+    colnames(plot_after_response) <- c('genus', 'response', 'failure')
+    plot_after_response$response <- (as.numeric(plot_after_response$response)+0)
+    plot_after_response$failure <- (as.numeric(plot_after_response$failure)+0)
+    plot_after_response$genus <- factor(plot_after_response$genus, levels = (rownames(tmp_pval_adjust05)[order(sign(tmp_pval_adjust05$gfc)/tmp_pval_adjust05$tmp_qvalue, decreasing = F)]))
+    plot_after_response$diff <- log2(plot_after_response$failure / plot_after_response$response)#ifelse(plot_after_response$response > plot_after_response$failure, plot_after_response$response / plot_after_response$failure, plot_after_response$failure / plot_after_response$response)
+    plot_after_response$qvalue <- tmp_pval_adjust05$tmp_qvalue
+    min_y = 0
+    mmin_y = -2
+    
+    p1<-ggplot(plot_after_response, aes(x = genus))+ #, aes(x = genus), color = sex
+      geom_linerange(data = plot_after_response, aes(ymin = 0, ymax = diff, color=ifelse(response > failure, "#4D9127", "#90908D")), size = 8, alpha = 0.8)+#ifelse(response > failure, mmin_y, min_y)
+      # geom_linerange(data = plot_after_response[plot_after_response$response < plot_after_response$failure,], aes(ymin = min_y, ymax = ), size = 6, alpha = 0.8, color=)+  -min_y+log10(qvalue), min_y-log10(qvalue)
+      geom_label(aes(x = genus, y = ifelse(response > failure, 0.1, -0.1), label = genus, family = "sans",  hjust=ifelse((response > failure), 0, 1)), 
+             inherit.aes = F, fontface = "italic",
+             size = 6, label.padding = unit(0.0, "lines"), label.size = 0,
+             label.r = unit(0.0, "lines"), fill = "NA", alpha = 0.9, color = "dimgrey")+
+      # scale_y_continuous(breaks = c(c(-2, -1, 0) - min_y, c(0, 1, 2, 3, 4, 5)+min_y),
+                     # labels = c("2", "1", "0", "0", "1", "2", "3", "4", "5"))+
+      # facet_wrap(~genus, ncol = 2)+
+      scale_y_continuous(expand = expansion(mult=c(0.03, 0.15)), breaks = c(c(-2, -1, 0) - min_y, c(0, 1, 2, 3, 4, 5)+min_y), labels = c("2", "1", "0", "0", "1", "2", "3", "4", "5"))+
+      coord_flip()+
+        labs(title="Marked genus in patients after FMT (P < 0.05)", x='', y="log2(FoldChange)", colour="Cluster")+
+      theme(text=element_text(family ="sans", size=24), plot.title = element_text(size=26, hjust = 0.5), axis.text = element_text(size=24, color ='dimgray'), axis.title.x = element_text(size=26, hjust = 0.33), axis.title.y = element_text(size=26), axis.ticks = element_blank())+
+      theme(aspect.ratio=1.3, legend.position = c(4, .65), legend.background=element_rect(fill = NA), legend.text = element_text(size=0))+
+      scale_colour_manual(values=c("#4D9127", "#90908D", "#7A1D1E", "#C47737", "#E7A600"))+
+      scale_alpha_manual(values = c(0.8))+
+      theme(panel.background = element_rect(fill = NA, colour = "lightgrey", size = 3)
+            ,axis.line=element_line(colour=NA, size = 0), axis.ticks.x = element_line(size=1.5, color ='dimgray'), axis.ticks.length = unit(7, "pt")
+            ,axis.text.y = element_text(size=0, angle = 0, color=NA)
+            # ,axis.text.x = element_text(size=21, angle = 0)
+            ,axis.ticks = element_blank())+theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())
+    p1
+```
+
+```{r}
+#diff_entero_list
+diff_response_list <- (tmp_pval_adjust05)
+
+##diff_entro_cdi diff_entro_ibd diff_entro_all
+p_threshold <- 0.0001
+diff_entro_cdi_names <- diff_entro_cdi[diff_entro_cdi$diff_qvalue < p_threshold, 'id']
+diff_entro_ibd_names <- diff_entro_ibd[diff_entro_ibd$diff_qvalue < p_threshold, 'id']
+diff_entro_all_names <- diff_entro_all[diff_entro_all$diff_qvalue < p_threshold, 'id']
+diff_entro_all_dmm_names <- diff_entro_all_dmm[diff_entro_all_dmm$diff_qvalue < p_threshold, 'id']
+
+
+inter_diff_names <- intersect(intersect(diff_entro_cdi_names, diff_entro_all_names), diff_entro_ibd_names)
+
+diff_entro_all_inter <- diff_entro_all[rownames(diff_entro_all) %in% inter_diff_names, ]
+diff_entro_all_inter$sign_pval <- sign(diff_entro_all_inter$gfc) * log(diff_entro_all_inter$diff_qvalue)
+
+inter_diff_names_order <-diff_entro_all_inter[order(diff_entro_all_inter$sign_pval), c('id')]#'id'
+inter_diff_names_order
+
+t_pre_data_remove_c_num <- apply(t_pre_data_remove_c[,1:(ncol(t_pre_data_remove_c)-2)], 2, as.numeric)
+t_pre_data_remove_c_diff <- t_pre_data_remove_c_num[,colnames(t_pre_data_remove_c_num) %in% c(inter_diff_names_order)]
+
+##pre_data.cluster
+mean_before1 <- apply(t_pre_data_remove_c_diff[t_pre_data_remove_c$pre_data.cluster %in% c('before1'), ], 2, mean)
+mean_before2 <- apply(t_pre_data_remove_c_diff[t_pre_data_remove_c$pre_data.cluster %in% c('before2'), ], 2, mean)
+
+```
+
+```{r, fig.height=10}
+scale_factor<-1e4
+plot_butter_data <- as.data.frame(cbind(data.frame(c(mean_before1-mean_before2)), c(names(mean_before1)), c(ifelse(mean_before1>mean_before2, 'before1', 'before2'))), stringsAsFactors = F)
+colnames(plot_butter_data) <- c('Ab', 'Names', 'Type')
+plot_butter_data$ONames <- factor(plot_butter_data$Names, levels = rev(inter_diff_names_order))
+plot_butter_data$LAb <- ifelse(plot_butter_data$Ab>0, log2(abs(plot_butter_data$Ab) * scale_factor), -log2(abs(plot_butter_data$Ab) * scale_factor))
+
+min_y<-1
+
+
+plot_butter_data$ONames <- factor(plot_butter_data$Names, levels = (inter_diff_names_order))
+ggplot(plot_butter_data, aes(x = (ONames), color = Type))+
+  geom_linerange(data = plot_butter_data[], 
+                 aes(ymin = 0, ymax = abs(LAb)), size = 8, alpha = 0.8)+
+  labs(title="", x='', y="log(Differential abundance)", colour="Cluster")+#Enterotypes enriched genera (q<1e-4)
+  theme(text=element_text(family ="sans", size=32), plot.title = element_text(size=34, hjust = -0.5), axis.text = element_text(size=32, color ='dimgray'), axis.text.x = element_text(size=32, color ='dimgray', angle = 45, hjust = 0.9), axis.title.x = element_text(size=34), axis.title.y = element_text(size=34))+
+  theme(aspect.ratio=0.4, legend.position = c(4, .65), legend.background=element_rect(fill = NA), legend.text = element_text(size=0))+
+  scale_colour_manual(values=c("#7A1D1E", "#C47737", "#E7A600"))+
+  scale_alpha_manual(values = c(0.8))+
+  theme(panel.background = element_rect(fill = NA, colour = "lightgrey", size = 3)
+        ,axis.line=element_line(colour=NA, size = 0), axis.ticks.y = element_line(size=1.5, color ='dimgray'), axis.ticks.length = unit(7, "pt")
+        # ,axis.text.y = element_text(size=0, angle = 0, color=NA)
+        ,axis.ticks.x = element_blank())+theme(panel.grid.major=element_blank(),panel.grid.minor=element_blank())
+# ggsave(paste("./figure1/1main_14g", ".pdf", sep = ''), device = "pdf")
+# fig1i = fig1i + 1
+```
+
+Add a new chunk by clicking the *Insert Chunk* button on the toolbar or by pressing *Ctrl+Alt+I*.
+
+When you save the notebook, an HTML file containing the code and output will be saved alongside it (click the *Preview* button or press *Ctrl+Shift+K* to preview the HTML file).
+
+The preview shows you a rendered HTML copy of the contents of the editor. Consequently, unlike *Knit*, *Preview* does not run any R code chunks. Instead, the output of the chunk when it was last run in the editor is displayed.
