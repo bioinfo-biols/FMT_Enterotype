@@ -1,0 +1,50 @@
+---
+title: "Test for C2R Notebook"
+output: html_notebook
+---
+
+This is an [R Markdown](http://rmarkdown.rstudio.com) Notebook. When you execute code within the notebook, the results appear beneath the code. 
+
+Try executing this chunk by clicking the *Run* button within the chunk or by placing your cursor inside it and pressing *Ctrl+Shift+Enter*. 
+
+```{r}
+source('C2R.R')
+
+
+FMT_abundance <- read.table('FMT_abundance.tsv', header = T)
+FMT_config <- read.table('FMT_config.tsv', header = T)
+
+```
+
+```{r}
+result <- C2R(FMT_abundance, FMT_config, group = 'Outcomes', blocked='Blocked')
+C2R = result$C2R
+pvalue = result$ratio_p
+pvalue
+```
+
+```{r, fig.height=8}
+library(ggplot2)
+cex = 1.5
+ggplot()+theme_classic()+
+    geom_density(aes(fc, stat(density), fill = group), C2R, alpha = (0.3), color='NA')+
+    scale_y_continuous(expand = expansion(mult =c(0.02, 0.08)))+#, limits = c(-0.005, 0.17)
+    scale_fill_manual(values = c("#90908D", "#4D9127"))+
+    scale_alpha_manual(values=c(1, 0.5))+
+  theme(text=element_text(family ="sans", size=32), plot.title = element_text(size=34, hjust = 0.5), axis.text = element_text(size=32, color ='dimgray'), axis.title.x = element_text(size=34), axis.title.y = element_text(size=34))+
+  theme(legend.position = "right")+xlab(label = 'C2R')+ylab("Density")+labs(title='')+
+  geom_text(aes(x=-2.5, y=0.18, label=paste('P =', format(round(pvalue(pvalue), 5), nsmall = 4) )), size=8*cex, color='dimgrey')+
+  theme(aspect.ratio = 0.9, legend.background=element_blank(), legend.position=c(5, 0.6)
+        ,panel.background = element_rect(fill = NA, colour = "lightgrey", size = 3)
+        ,axis.line=element_line(colour=NA, size = 0), , axis.ticks = element_line(size=1.5, color ='dimgray'), axis.ticks.length = unit(7, "pt")
+        ,legend.key = element_rect(fill = NA, color = NA))+
+  guides(colour = guide_legend(override.aes = list(size=3)));
+
+```
+
+
+Add a new chunk by clicking the *Insert Chunk* button on the toolbar or by pressing *Ctrl+Alt+I*.
+
+When you save the notebook, an HTML file containing the code and output will be saved alongside it (click the *Preview* button or press *Ctrl+Shift+K* to preview the HTML file).
+
+The preview shows you a rendered HTML copy of the contents of the editor. Consequently, unlike *Knit*, *Preview* does not run any R code chunks. Instead, the output of the chunk when it was last run in the editor is displayed.
