@@ -28,4 +28,5 @@ We provided test Rmd script and test files in the folder "C2R":
 &nbsp; &nbsp; &nbsp; &nbsp; test files: &nbsp; FMT_abundance.tsv and FMT_abundance.tsv  
 
 ### Citation:
-The interplay of gut microbiota between donors and recipients determines the efficacy of fecal microbiota transplantation. Under review.
+Ruiqiao He, Pan Li, Jinfeng Wang, Bota Cui, Faming Zhang & Fangqing Zhao (2022) The interplay of gut microbiota between donors and recipients determines the efficacy of fecal microbiota transplantation, Gut Microbes, 14:1, DOI: 10.1080/19490976.2022.2100197
+
