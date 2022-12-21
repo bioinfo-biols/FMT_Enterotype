@@ -31,7 +31,7 @@ classify_colonizer <- function(x, abundance){
     index <- match(as.character(unlist(x)), rownames(abundance))
     index_L6 <- abundance[index,]
     
-    index_fc<- apply(index_L6, 1, function(y, x){
+    index_fc<- apply(index_L6, 2, function(y, x){
         out_p <- log((y[3]/y[1])+1);
         out_d <- log((y[3]/y[2])+1);
         c(out_p, out_d, y[3])}, x=x)
@@ -96,6 +96,8 @@ engraft_test<-function(fold_change, FMT_config, group, blocked=0){
 }
 
 C2R <- function(FMT_abundance, FMT_config, group = 'Outcomes', blocked=0){
+    sample_size <- colSums(FMT_abundance)
+    L6_rela <- 100 * t(apply(FMT_abundance, 1, function(x){x/sample_size}))
     fold_change <- cal_fc(FMT_abundance, FMT_config)
     
     output<- engraft_test(fold_change, FMT_config, group, blocked)
